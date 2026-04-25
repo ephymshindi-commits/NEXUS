@@ -319,3 +319,206 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: .85rem; padding: 2rem; text-align: center; }
 .empty-state .ei { font-size: 2.6rem; opacity: .18; }
 .empty-state p { font-size: .78rem; color: var(--muted2); line-height: 1.75; }
+
+.wa-call-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.wa-bg {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(10px);
+}
+
+.wa-card {
+  position: relative;
+  width: 320px;
+  background: #111;
+  border-radius: 20px;
+  padding: 20px;
+  text-align: center;
+  color: white;
+  z-index: 2;
+}
+
+.wa-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #25D366;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  margin: 0 auto;
+}
+
+.wa-name {
+  margin-top: 10px;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+.wa-status {
+  font-size: 13px;
+  color: #aaa;
+  margin-top: 5px;
+}
+
+.wa-actions {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 20px;
+}
+
+.wa-accept {
+  background: #25D366;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 10px;
+  color: white;
+}
+
+.wa-reject {
+  background: red;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 10px;
+  color: white;
+}
+
+.wa-end {
+  background: #ff3b30;
+  border: none;
+  padding: 10px 15px;
+  border-radius: 10px;
+  color: white;
+}
+
+.wa-video {
+  width: 100%;
+  margin-top: 10px;
+  border-radius: 10px;
+}
+
+/* =========================
+   WHATSAPP CALL UI UPGRADE
+   ========================= */
+
+.wa-call {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-blur {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.92);
+  backdrop-filter: blur(12px);
+}
+
+.wa-container {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  color: white;
+  z-index: 2;
+}
+
+.wa-avatar {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #25D366;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  margin: 0 auto;
+  animation: pop 0.3s ease;
+}
+
+.wa-name {
+  margin-top: 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.wa-status {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+/* pulse ring animation */
+.wa-ring-pulse {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 2px solid #25D366;
+  animation: pulse 1.5s infinite;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes pulse {
+  0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+}
+
+.wa-video {
+  width: 100%;
+  margin-top: 15px;
+  border-radius: 12px;
+}
+
+.wa-actions {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 20px;
+}
+
+.wa-accept {
+  background: #25D366;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 600;
+}
+
+.wa-decline {
+  background: red;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 600;
+}
+
+.wa-end {
+  background: #ff3b30;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 10px;
+  color: white;
+  font-weight: 600;
+}
+
+@keyframes pop {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}

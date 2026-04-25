@@ -2,49 +2,48 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { sb } from './lib/supabase'
 import { clr, ini, ago, fmtTime } from './lib/helpers'
 import { useToast } from './hooks/useToast'
-import { Av, Icons }         from './components/Av'
-import AuthScreen            from './components/AuthScreen'
+import { Av, Icons } from './components/Av'
+import AuthScreen from './components/AuthScreen'
 import { StoriesBar, StoryViewer } from './components/Stories'
-import CallOverlay           from './components/CallOverlay'
+import CallOverlay from './components/CallOverlay'
 import { PlansModal, NewConvModal } from './components/Modals'
 import { SocialFeed, DatingScreen, NotificationsPanel, SettingsPanel } from './pages/Views'
 
 export default function App() {
   const toast = useToast()
 
-  /* ── auth state ── */
+  // auth
   const [user,    setUser]    = useState(null)
   const [profile, setProfile] = useState(null)
 
-  /* ── nav state ── */
-  const [view,    setView]    = useState('chats') // chats | feed | dating | notifs | settings
+  // nav
+  const [view, setView] = useState('chats')
 
-  /* ── conversations ── */
-  const [convs,      setConvs]      = useState([])
-  const [activeConv, setActiveConv] = useState(null)
-  const [msgs,       setMsgs]       = useState([])
-  const [input,      setInput]      = useState('')
+  // conversations
+  const [convs,       setConvs]       = useState([])
+  const [activeConv,  setActiveConv]  = useState(null)
+  const [msgs,        setMsgs]        = useState([])
+  const [input,       setInput]       = useState('')
   const [onlineUsers, setOnlineUsers] = useState([])
 
-  /* ── call state ── */
+  // calls
   const [call,         setCall]         = useState(null)
   const [localStream,  setLocalStream]  = useState(null)
   const [remoteStream, setRemoteStream] = useState(null)
 
-  /* ── ui toggles ── */
-  const [storyView,   setStoryView]   = useState(null)
-  const [showNewConv, setShowNewConv] = useState(false)
-  const [showPlans,   setShowPlans]   = useState(false)
-  const [tab,         setTab]         = useState('all')
-  const [search,      setSearch]      = useState('')
+  // ui
+  const [storyView,    setStoryView]   = useState(null)
+  const [showNewConv,  setShowNewConv] = useState(false)
+  const [showPlans,    setShowPlans]   = useState(false)
+  const [tab,          setTab]         = useState('all')
+  const [search,       setSearch]      = useState('')
+  const [userResults,  setUserResults] = useState([])
 
-  const msgSub  = useRef(null)
-  const msgEnd  = useRef(null)
+  const msgSub   = useRef(null)
+  const msgEnd   = useRef(null)
   const peerConn = useRef(null)
 
-  /* ────────────────────────────────────────────── */
-  /* AUTH                                           */
-  /* ────────────────────────────────────────────── */
+  /* ── AUTH ── */
   useEffect(() => {
     sb.auth.getSession().then(({ data: { session } }) => {
       if (session) handleAuth(session.user)
@@ -56,6 +55,15 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // heartbeat
+  useEffect(() => {
+    if (!user) return
+    const iv = setInterval(() => {
+      sb.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', user.id)
+    }, 120_000)
+    return () => clearInterval(iv)
+  }, [user])
+
   const handleAuth = async (u) => {
     setUser(u)
     const { data: p } = await sb.from('profiles').select('*').eq('id', u.id).single()
@@ -64,10 +72,6 @@ export default function App() {
     loadConvs(u.id)
     loadOnline(u.id)
     toast('👋', `Welcome back${p?.display_name ? ', ' + p.display_name : ''}!`)
-
-    // heartbeat every 2 min
-    const iv = setInterval(() => sb.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', u.id), 120_000)
-    return () => clearInterval(iv)
   }
 
   const signOut = async () => {
@@ -75,20 +79,23 @@ export default function App() {
     setUser(null); setProfile(null); setConvs([]); setActiveConv(null); setMsgs([])
   }
 
-  /* ────────────────────────────────────────────── */
-  /* CONVERSATIONS                                  */
-  /* ────────────────────────────────────────────── */
+  /* ── CONVERSATIONS ── */
   const loadConvs = async (uid) => {
-    const { data: mems } = await sb.from('conversation_members').select('conversation_id').eq('user_id', uid)
+    const { data: mems } = await sb
+      .from('conversation_members')
+      .select('conversation_id')
+      .eq('user_id', uid)
     if (!mems?.length) { setConvs([]); return }
     const ids = mems.map((m) => m.conversation_id)
-    const { data } = await sb.from('conversations').select('*').in('id', ids).order('last_message_at', { ascending: false })
+    const { data } = await sb
+      .from('conversations')
+      .select('*')
+      .in('id', ids)
+      .order('created_at', { ascending: false })
     setConvs(data || [])
   }
 
-  /* ────────────────────────────────────────────── */
-  /* MESSAGES                                       */
-  /* ────────────────────────────────────────────── */
+  /* ── MESSAGES ── */
   const openConv = useCallback(async (conv) => {
     setActiveConv(conv)
     if (msgSub.current) { await sb.removeChannel(msgSub.current); msgSub.current = null }
@@ -102,14 +109,15 @@ export default function App() {
     setMsgs(data || [])
     setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 80)
 
-    // realtime subscription
     msgSub.current = sb
       .channel('msgs_' + conv.id)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
         (payload) => {
           setMsgs((m) => [...m, payload.new])
           setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-        })
+        }
+      )
       .subscribe()
   }, [])
 
@@ -124,31 +132,35 @@ export default function App() {
       message_type: 'text',
     })
     if (error) { toast('❌', 'Send failed: ' + error.message); return }
-    await sb.from('conversations').update({ last_message: text, last_message_at: new Date().toISOString() }).eq('id', activeConv.id)
+    // update last message safely
+    await sb.from('conversations')
+      .update({ last_message_at: new Date().toISOString() })
+      .eq('id', activeConv.id)
     loadConvs(user.id)
   }
 
-  /* ────────────────────────────────────────────── */
-  /* ONLINE USERS                                   */
-  /* ────────────────────────────────────────────── */
+  /* ── ONLINE USERS ── */
   const loadOnline = async (uid) => {
     const five = new Date(Date.now() - 5 * 60 * 1000).toISOString()
-    const { data } = await sb.from('profiles').select('*').gt('last_seen', five).neq('id', uid).limit(6)
+    const { data } = await sb
+      .from('profiles').select('*')
+      .gt('last_seen', five)
+      .neq('id', uid)
+      .limit(6)
     setOnlineUsers(data || [])
     setTimeout(() => loadOnline(uid), 30_000)
   }
 
-  /* ────────────────────────────────────────────── */
-  /* WEBRTC CALLS                                   */
-  /* ────────────────────────────────────────────── */
+  /* ── WEBRTC CALLS ── */
   const startCall = async (type) => {
     if (!activeConv) { toast('💬', 'Select a conversation first'); return }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(
-        type === 'video' ? { video: true, audio: true } : { audio: true }
-      )
+      const constraints = type === 'video' ? { video: true, audio: true } : { audio: true }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
       setLocalStream(stream)
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] })
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      })
       peerConn.current = pc
       stream.getTracks().forEach((t) => pc.addTrack(t, stream))
       pc.ontrack = (e) => setRemoteStream(e.streams[0])
@@ -168,10 +180,20 @@ export default function App() {
     toast('📵', 'Call ended')
   }
 
-  /* ────────────────────────────────────────────── */
-  /* FILTERED CONVS                                 */
-  /* ────────────────────────────────────────────── */
-  const filteredConvs = convs.filter((c) => {
+  /* ── USER SEARCH ── */
+  const searchUsers = async (query) => {
+    if (!query.trim() || query.length < 2) { setUserResults([]); return }
+    const { data } = await sb
+      .from('profiles')
+      .select('*')
+      .or(`username.ilike.%${query}%,display_name.ilike.%${query}%`)
+      .neq('id', user?.id)
+      .limit(6)
+    setUserResults(data || [])
+  }
+
+  /* ── FILTERED CONVS ── */
+  const filteredConvs = (convs || []).filter((c) => {
     const ms = !search || c.name?.toLowerCase().includes(search.toLowerCase())
     const mt = tab === 'all' || (tab === 'groups' ? c.is_group : !c.is_group)
     return ms && mt
@@ -181,33 +203,27 @@ export default function App() {
 
   if (!user) return <AuthScreen onAuth={handleAuth} />
 
-  /* ────────────────────────────────────────────── */
-  /* RENDER                                         */
-  /* ────────────────────────────────────────────── */
+  /* ── RENDER ── */
   return (
     <div className="shell">
 
-      {/* ── RAIL ── */}
+      {/* RAIL */}
       <nav className="rail">
-        <div className="rail-logo" onClick={() => toast('🚀', 'NEXUS — Phase 4 Complete! 🎉')}>N</div>
-
+        <div className="rail-logo" onClick={() => toast('🚀', 'NEXUS')}>N</div>
         <button className={`rail-btn${view === 'chats'    ? ' active' : ''}`} onClick={() => setView('chats')}    title="Messages">{Icons.chat}</button>
         <button className={`rail-btn${view === 'feed'     ? ' active' : ''}`} onClick={() => setView('feed')}     title="Social Feed">{Icons.feed}</button>
-        <button className={`rail-btn${view === 'dating'   ? ' active' : ''}`} onClick={() => setView('dating')}   title="💝 Hearts">
+        <button className={`rail-btn${view === 'dating'   ? ' active' : ''}`} onClick={() => setView('dating')}   title="Hearts">
           {Icons.heart}<span className="rdot" style={{ background: 'var(--rose)' }} />
         </button>
         <button className={`rail-btn${view === 'notifs'   ? ' active' : ''}`} onClick={() => setView('notifs')}   title="Notifications">
           {Icons.bell}<span className="rdot" style={{ background: 'var(--accent)' }} />
         </button>
-        <button className={`rail-btn`}                                         onClick={() => startCall('phone')}  title="Voice Call">{Icons.phone}</button>
-        <button className={`rail-btn`}                                         onClick={() => startCall('video')}  title="Video Call">{Icons.video}</button>
-
         <div className="rail-spacer" />
         <button className={`rail-btn${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')} title="Settings">{Icons.cog}</button>
         <div className="rav" style={{ background: clr(user.id) }} title={myName}>{ini(myName)}</div>
       </nav>
 
-      {/* ── SIDEBAR ── */}
+      {/* SIDEBAR */}
       <div className="sidebar">
         <div className="sb-head">
           <div className="sb-top">
@@ -216,9 +232,37 @@ export default function App() {
             </span>
             <button className="icon-btn" onClick={() => setShowNewConv(true)} title="New">{Icons.plus}</button>
           </div>
-          <div className="search-row">
+
+          {/* Search with live user dropdown */}
+          <div className="search-row" style={{ position: 'relative' }}>
             {Icons.search}
-            <input placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input
+              placeholder="Search people or chats…"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); searchUsers(e.target.value) }}
+              onBlur={() => setTimeout(() => setUserResults([]), 200)}
+            />
+            {userResults.length > 0 && (
+              <div style={{ position: 'absolute', top: '110%', left: 0, right: 0, background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 10, zIndex: 100, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
+                {userResults.map((u) => (
+                  <div
+                    key={u.id}
+                    onMouseDown={() => { setSearch(''); setUserResults([]) }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '.6rem', padding: '.6rem .85rem', cursor: 'pointer' }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--card)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ width: 30, height: 30, borderRadius: '50%', background: clr(u.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.6rem', fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                      {ini(u.display_name || u.username)}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '.78rem', fontWeight: 600 }}>{u.display_name || u.username}</div>
+                      <div style={{ fontSize: '.62rem', color: 'var(--muted2)' }}>@{u.username}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -262,18 +306,16 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── MAIN CONTENT ── */}
+      {/* MAIN CONTENT */}
       <div className="main">
         {view === 'feed'     ? <SocialFeed currentUser={user} currentProfile={profile} /> :
          view === 'dating'   ? <DatingScreen onUpgrade={() => setShowPlans(true)} /> :
          view === 'notifs'   ? <NotificationsPanel /> :
          view === 'settings' ? <SettingsPanel user={user} profile={profile} onSignOut={signOut} /> :
 
-         /* CHATS view */
          activeConv ? (
            <>
              <StoriesBar onView={setStoryView} />
-             {/* Topbar */}
              <div className="topbar">
                <Av name={activeConv.name} id={activeConv.id} size={34} />
                <div className="tb-info">
@@ -281,13 +323,12 @@ export default function App() {
                  <div className="tb-status on">{activeConv.is_group ? `Group · ${msgs.length} messages` : 'Active'}</div>
                </div>
                <div className="tb-actions">
-                 <button className="icon-btn" onClick={() => startCall('voice')} title="Voice call">{Icons.phone}</button>
+                 <button className="icon-btn" onClick={() => startCall('audio')} title="Voice call">{Icons.phone}</button>
                  <button className="icon-btn" onClick={() => startCall('video')} title="Video call">{Icons.video}</button>
                  <button className="icon-btn">{Icons.dots}</button>
                </div>
              </div>
 
-             {/* Messages */}
              <div className="msgs">
                {msgs.length === 0 && (
                  <div className="empty-state">
@@ -298,7 +339,7 @@ export default function App() {
                <div className="date-div"><span>Today</span></div>
                {msgs.map((m, i) => {
                  const mine = m.sender_id === user.id
-                 const sn   = m.profiles?.display_name || m.profiles?.username || 'Unknown'
+                 const sn = m.profiles?.display_name || m.profiles?.username || 'Unknown'
                  return (
                    <div key={m.id || i} className={`mrow msg-anim${mine ? ' mine' : ''}`}>
                      {!mine && <div className="mav" style={{ background: clr(m.sender_id), width: 24, height: 24, fontSize: '.55rem' }}>{ini(sn)}</div>}
@@ -313,7 +354,6 @@ export default function App() {
                <div ref={msgEnd} />
              </div>
 
-             {/* Input */}
              <div className="input-bar">
                <div className="input-wrap">
                  <button className="ib" onClick={() => toast('📎', 'File sharing — coming soon!')}>{Icons.attach}</button>
@@ -340,9 +380,8 @@ export default function App() {
         }
       </div>
 
-      {/* ── RIGHT PANEL ── */}
+      {/* RIGHT PANEL */}
       <div className="rpanel">
-        {/* Trial */}
         <div className="rp-sec">
           <div className="rp-lbl">Your Trial</div>
           <div className="trial-card">
@@ -354,7 +393,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Dating teaser */}
         <div className="rp-sec">
           <div className="rp-lbl">💝 Nexus Hearts</div>
           <div className="dating-card">
@@ -364,13 +402,12 @@ export default function App() {
           </div>
         </div>
 
-        {/* Online now */}
         <div className="rp-sec">
           <div className="rp-lbl">Active Now</div>
           {onlineUsers.length === 0
             ? <div style={{ fontSize: '.7rem', color: 'var(--muted)' }}>No one online right now</div>
             : onlineUsers.map((u) => (
-                <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.55rem', cursor: 'pointer' }}>
+                <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.55rem' }}>
                   <div style={{ width: 28, height: 28, borderRadius: '50%', background: clr(u.id), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '.56rem', fontWeight: 700, color: '#fff', flexShrink: 0, position: 'relative' }}>
                     {ini(u.display_name || u.username)}
                     <span style={{ position: 'absolute', bottom: 0, right: 0, width: 7, height: 7, background: 'var(--green)', borderRadius: '50%', border: '1.5px solid var(--surface)' }} />
@@ -384,14 +421,13 @@ export default function App() {
           }
         </div>
 
-        {/* Support quick links */}
         <div className="rp-sec">
           <div className="rp-lbl">🛟 Support</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
             {[
-              { href: `tel:0114419282`,           icon: '📞', label: 'Support', val: '0114419282' },
-              { href: `tel:0797317925`,            icon: '🆘', label: 'Helpline', val: '0797317925' },
-              { href: `mailto:ephy3605@gmail.com`, icon: '✉️', label: 'Email',   val: 'ephy3605@gmail.com' },
+              { href: 'tel:0114419282',           icon: '📞', label: 'Support',  val: '0114419282' },
+              { href: 'tel:0797317925',            icon: '🆘', label: 'Helpline', val: '0797317925' },
+              { href: 'mailto:ephy3605@gmail.com', icon: '✉️', label: 'Email',    val: 'ephy3605@gmail.com' },
             ].map((s) => (
               <a key={s.label} href={s.href} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.45rem .6rem', background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', textDecoration: 'none' }}>
                 <span style={{ fontSize: '.82rem' }}>{s.icon}</span>
@@ -404,34 +440,13 @@ export default function App() {
           </div>
         </div>
 
-                {/* Support quick links */}
-        <div className="rp-sec">
-          <div className="rp-lbl">🛟 Support</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
-            {[
-              { href: `tel:0114419282`, icon: '📞', label: 'Support', val: '0114419282' },
-              { href: `tel:0797317925`, icon: '🆘', label: 'Helpline', val: '0797317925' },
-              { href: `mailto:ephy3605@gmail.com`, icon: '✉️', label: 'Email', val: 'ephy3605@gmail.com' },
-            ].map((s) => (
-              <a key={s.label} href={s.href} style={{ display: 'flex', alignItems: 'center', gap: '.45rem', padding: '.45rem .6rem', background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', textDecoration: 'none' }}>
-                <span style={{ fontSize: '.82rem' }}>{s.icon}</span>
-                <div>
-                  <div style={{ fontSize: '.68rem', fontWeight: 600, color: 'var(--text)' }}>{s.label}</div>
-                  <div style={{ fontSize: '.6rem', color: 'var(--muted2)', fontFamily: 'var(--mono)' }}>{s.val}</div>
-                </div>
-              </a>
-            ))}
-          </div>
-        </div> {/* ✅ CLOSE Support */}
-
-        {/* Suggested Users */}
         <div className="rp-sec">
           <div className="rp-lbl">Suggested for You</div>
           {onlineUsers.length === 0 ? (
             <div style={{ fontSize: '.7rem', color: 'var(--muted)', lineHeight: 1.7 }}>
               Invite friends to join Nexus!<br />
               <a
-                href={`mailto:?subject=Join me on NEXUS&body=Hey! Join me on NEXUS — sign up at ${window.location.origin}`}
+                href={`mailto:?subject=Join me on NEXUS&body=Hey! Join me on NEXUS — sign up at ${typeof window !== 'undefined' ? window.location.origin : ''}`}
                 style={{ color: 'var(--accent)', fontSize: '.68rem', textDecoration: 'none', fontWeight: 600 }}
               >
                 📨 Send invite link
@@ -449,62 +464,22 @@ export default function App() {
                 </div>
               </div>
               <button
-                onClick={() => toast('💬', `Starting chat with ${u.display_name || u.username}`)}
+                onClick={() => toast('💬', `Message ${u.display_name || u.username}`)}
                 style={{ fontSize: '.6rem', padding: '3px 8px', background: 'rgba(79,110,247,.14)', color: 'var(--accent)', border: '1px solid rgba(79,110,247,.25)', borderRadius: 6, cursor: 'pointer', fontFamily: 'var(--font)', fontWeight: 600 }}
               >
                 Message
               </button>
             </div>
           ))}
-        </div> {/* ✅ CLOSE Suggested */}
+        </div>
+      </div>
 
-      </div> {/* ✅ CLOSE rpanel */}
+      {/* OVERLAYS */}
+      {call && <CallOverlay call={call} onEnd={endCall} localStream={localStream} remoteStream={remoteStream} />}
+      {storyView   && <StoryViewer story={storyView} onClose={() => setStoryView(null)} />}
+      {showNewConv && <NewConvModal onClose={() => setShowNewConv(false)} uid={user.id} onCreated={(conv) => { setShowNewConv(false); loadConvs(user.id); openConv(conv); setView('chats'); toast('✅', 'Conversation created!') }} />}
+      {showPlans   && <PlansModal onClose={() => setShowPlans(false)} onSelect={(plan) => { setShowPlans(false); toast('⭐', `${plan === 'premium' ? 'Premium' : 'Basic'} selected — payment coming soon!`) }} />}
 
-      {/* ── OVERLAYS ── */}
-
-      {call && (
-        <CallOverlay
-          call={call}
-          onEnd={endCall}
-          localStream={localStream}
-          remoteStream={remoteStream}
-        />
-      )}
-
-      {storyView && (
-        <StoryViewer
-          story={storyView}
-          onClose={() => setStoryView(null)}
-        />
-      )}
-
-      {showNewConv && (
-        <NewConvModal
-          onClose={() => setShowNewConv(false)}
-          uid={user.id}
-          onCreated={(conv) => {
-            setShowNewConv(false);
-            loadConvs(user.id);
-            openConv(conv);
-            setView('chats');
-            toast('✅', 'Conversation created!');
-          }}
-        />
-      )}
-
-      {showPlans && (
-        <PlansModal
-          onClose={() => setShowPlans(false)}
-          onSelect={(plan) => {
-            setShowPlans(false);
-            toast(
-              '⭐',
-              `${plan === 'premium' ? 'Premium' : 'Basic'} selected — payment coming soon!`
-            );
-          }}
-        />
-      )}
-
-    </div> /* END shell */
-  );
+    </div>
+  )
 }

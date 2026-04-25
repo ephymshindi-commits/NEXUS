@@ -92,8 +92,7 @@ export function NewConvModal({ onClose, onCreated, uid }) {
     if (mode === 'group') {
       const { data: conv, error } = await sb
         .from('conversations')
-        .insert({ name: gname || 'New Group', is_group: true, last_message: '', last_message_at: new Date().toISOString() })
-        .select().single()
+.insert({ name: gname || 'New Group', is_group: true })        .select().single()
       if (error) { toast('❌', error.message); setLoading(false); return }
       await sb.from('conversation_members').insert({ conversation_id: conv.id, user_id: uid, role: 'admin' })
       onCreated(conv)
@@ -104,8 +103,7 @@ export function NewConvModal({ onClose, onCreated, uid }) {
       if (other.id === uid) { toast('❌', "That's you! Try someone else 😄"); setLoading(false); return }
       const { data: conv, error } = await sb
         .from('conversations')
-        .insert({ name: other.display_name || other.username, is_group: false, last_message: '', last_message_at: new Date().toISOString() })
-        .select().single()
+.insert({ name: other.display_name || other.username, is_group: false })        .select().single()
       if (error) { toast('❌', error.message); setLoading(false); return }
       await sb.from('conversation_members').insert([
         { conversation_id: conv.id, user_id: uid,      role: 'member' },

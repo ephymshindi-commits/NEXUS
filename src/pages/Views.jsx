@@ -231,13 +231,36 @@ export function SettingsPanel({ user, profile, onSignOut }) {
     notifs: true, sounds: true, typing: true, online: true, darkMode: true, dating: false,
   })
   const tog = (k) => setToggles((t) => ({ ...t, [k]: !t[k] }))
-  const myName = profile?.display_name || profile?.username || 'User'
+const myName = profile?.display_name || profile?.username || 'User'
+const [showEditProfile, setShowEditProfile] = useState(false)
+const [showPrivacy,     setShowPrivacy]     = useState(false)
+const [showChangePass,  setShowChangePass]  = useState(false)
+const [newName,         setNewName]         = useState(profile?.display_name || '')
+const [newPass,         setNewPass]         = useState('')
+const [saving,          setSaving]          = useState(false)
+
+const saveProfile = async () => {
+  setSaving(true)
+  const { error } = await sb.from('profiles').update({ display_name: newName }).eq('id', user?.id)
+  if (error) toast('❌', 'Could not save: ' + error.message)
+  else { toast('✅', 'Profile updated!'); setShowEditProfile(false) }
+  setSaving(false)
+}
+
+const changePassword = async () => {
+  if (newPass.length < 6) { toast('❌', 'Password needs at least 6 characters'); return }
+  setSaving(true)
+  const { error } = await sb.auth.updateUser({ password: newPass })
+  if (error) toast('❌', error.message)
+  else { toast('✅', 'Password changed!'); setShowChangePass(false); setNewPass('') }
+  setSaving(false)
+}
 
   const sections = [
     { title: 'Account', items: [
-      { icon: '👤', label: 'Edit Profile',    desc: myName,                       action: () => toast('👤', 'Profile editor — coming soon!') },
-      { icon: '🔒', label: 'Privacy',         desc: 'Manage who can contact you', action: () => toast('🔒', 'Privacy settings — coming soon!') },
-      { icon: '🔑', label: 'Change Password', desc: 'Update your password',        action: () => toast('🔑', 'Password change — coming soon!') },
+      { icon: '👤', label: 'Edit Profile',    desc: myName,                       action: () => setShowEditProfile(true) },
+      { icon: '🔒', label: 'Privacy',         desc: 'Manage who can contact you', action: () => setShowPrivacy(true) },
+      { icon: '🔑', label: 'Change Password', desc: 'Update your password',        action: () => setShowChangePass(true) },
     ]},
     { title: 'Notifications', items: [
       { icon: '🔔', label: 'Push Notifications', desc: 'Message and activity alerts',  toggle: 'notifs' },
@@ -335,6 +358,66 @@ export function SettingsPanel({ user, profile, onSignOut }) {
           Sign Out
         </button>
       </div>
+
+{/* Edit Profile Modal */}
+      {showEditProfile && (
+        <div className="overlay">
+          <div className="modal-box" style={{ width: 360 }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '.3rem' }}>Edit Profile</h3>
+            <p style={{ fontSize: '.74rem', color: 'var(--muted2)', marginBottom: '1.2rem' }}>Update your display name.</p>
+            <div className="form-group">
+              <label>Display Name</label>
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Your name" style={{ width: '100%', padding: '.68rem .88rem', background: 'var(--bg)', border: '1px solid var(--border2)', borderRadius: 9, color: 'var(--text)', fontFamily: 'var(--font)', fontSize: '.8rem', outline: 'none' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '.5rem', marginTop: '1rem' }}>
+              <button onClick={() => setShowEditProfile(false)} style={{ flex: 1, padding: '.65rem', background: 'transparent', border: '1px solid var(--border2)', color: 'var(--muted2)', fontFamily: 'var(--font)', fontSize: '.75rem', fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={saveProfile} disabled={saving} style={{ flex: 2, padding: '.65rem', background: 'var(--accentg)', color: '#fff', fontFamily: 'var(--font)', fontSize: '.75rem', fontWeight: 600, borderRadius: 8, border: 'none', cursor: 'pointer' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Privacy Modal */}
+      {showPrivacy && (
+        <div className="overlay">
+          <div className="modal-box" style={{ width: 360 }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '.3rem' }}>Privacy Settings</h3>
+            <p style={{ fontSize: '.74rem', color: 'var(--muted2)', marginBottom: '1.2rem' }}>Control who can see and contact you.</p>
+            {[
+              { label: 'Show online status',    desc: 'Let others see when you\'re active' },
+              { label: 'Allow DMs from anyone', desc: 'Anyone can start a conversation with you' },
+              { label: 'Show in search results',desc: 'Appear when people search by username' },
+            ].map((item, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '.7rem .9rem', background: 'var(--card)', borderRadius: 10, marginBottom: '.4rem', border: '1px solid var(--border)' }}>
+                <div>
+                  <div style={{ fontSize: '.78rem', fontWeight: 600 }}>{item.label}</div>
+                  <div style={{ fontSize: '.64rem', color: 'var(--muted2)', marginTop: '.1rem' }}>{item.desc}</div>
+                </div>
+                <button className="toggle on" />
+              </div>
+            ))}
+            <button onClick={() => setShowPrivacy(false)} style={{ width: '100%', marginTop: '1rem', padding: '.65rem', background: 'var(--accentg)', color: '#fff', fontFamily: 'var(--font)', fontSize: '.78rem', fontWeight: 600, borderRadius: 9, border: 'none', cursor: 'pointer' }}>Done</button>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showChangePass && (
+        <div className="overlay">
+          <div className="modal-box" style={{ width: 360 }}>
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '.3rem' }}>Change Password</h3>
+            <p style={{ fontSize: '.74rem', color: 'var(--muted2)', marginBottom: '1.2rem' }}>Choose a new secure password.</p>
+            <div className="form-group">
+              <label>New Password</label>
+              <input type="password" value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Min. 6 characters" style={{ width: '100%', padding: '.68rem .88rem', background: 'var(--bg)', border: '1px solid var(--border2)', borderRadius: 9, color: 'var(--text)', fontFamily: 'var(--font)', fontSize: '.8rem', outline: 'none' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '.5rem', marginTop: '1rem' }}>
+              <button onClick={() => setShowChangePass(false)} style={{ flex: 1, padding: '.65rem', background: 'transparent', border: '1px solid var(--border2)', color: 'var(--muted2)', fontFamily: 'var(--font)', fontSize: '.75rem', fontWeight: 600, borderRadius: 8, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={changePassword} disabled={saving} style={{ flex: 2, padding: '.65rem', background: 'var(--accentg)', color: '#fff', fontFamily: 'var(--font)', fontSize: '.75rem', fontWeight: 600, borderRadius: 8, border: 'none', cursor: 'pointer' }}>{saving ? 'Saving...' : 'Update Password'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
