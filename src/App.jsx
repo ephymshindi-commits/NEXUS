@@ -109,16 +109,22 @@ export default function App() {
     setMsgs(data || [])
     setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 80)
 
-    msgSub.current = sb
-      .channel('msgs_' + conv.id)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
-        (payload) => {
-          setMsgs((m) => [...m, payload.new])
-          setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-        }
-      )
-      .subscribe()
+msgSub.current = sb
+  .channel('msgs_' + conv.id + '_' + Math.random())
+  .on('postgres_changes',
+    { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
+    (payload) => {
+      setMsgs((m) => {
+        // prevent duplicates
+        if (m.find(msg => msg.id === payload.new.id)) return m
+        return [...m, payload.new]
+      })
+      setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+  )
+  .subscribe((status) => {
+    console.log('Realtime status:', status)
+  })
   }, [])
 
   const sendMsg = async () => {
