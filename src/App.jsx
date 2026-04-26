@@ -127,24 +127,54 @@ msgSub.current = sb
   })
   }, [])
 
-  const sendMsg = async () => {
+const sendMsg = async () => {
     const text = input.trim()
     if (!text || !activeConv || !user) return
     setInput('')
-    const { error } = await sb.from('messages').insert({
+
+    // optimistically show message immediately
+    const tempMsg = {
+      id: 'temp_' + Date.now(),
       conversation_id: activeConv.id,
       sender_id: user.id,
       content: text,
       message_type: 'text',
-    })
-    if (error) { toast('❌', 'Send failed: ' + error.message); return }
-    // update last message safely
+      created_at: new Date().toISOString(),
+      profiles: { display_name: profile?.display_name, username: profile?.username }
+    }
+    setMsgs((m) => [...m, tempMsg])
+    setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+
+    const { data, error } = await sb.from('messages').insert({
+      conversation_id: activeConv.id,
+      sender_id: user.id,
+      content: text,
+      message_type: 'text',
+    }).select()
+
+    if (error) {
+      toast('❌', 'Send failed: ' + error.message)
+      // remove temp message on failure
+      setMsgs((m) => m.filter(msg => msg.id !== tempMsg.id))
+      setInput(text)
+      return
+    }
+
+    // replace temp message with real one from db
+    if (data?.[0]) {
+      setMsgs((m) => m.map(msg => msg.id === tempMsg.id ? {...data[0], profiles: tempMsg.profiles} : msg))
+    }
+
+    // update conversation last message
     await sb.from('conversations')
-      .update({ last_message_at: new Date().toISOString() })
+      .update({ 
+        last_message: text,
+        last_message_at: new Date().toISOString()
+      })
       .eq('id', activeConv.id)
+    
     loadConvs(user.id)
   }
-
   /* ── ONLINE USERS ── */
   const loadOnline = async (uid) => {
     const five = new Date(Date.now() - 5 * 60 * 1000).toISOString()
