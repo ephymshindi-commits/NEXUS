@@ -320,205 +320,105 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); font
 .empty-state .ei { font-size: 2.6rem; opacity: .18; }
 .empty-state p { font-size: .78rem; color: var(--muted2); line-height: 1.75; }
 
-.wa-call-overlay {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
+/* ── MOBILE RESPONSIVE ── */
+@media (max-width: 768px) {
+  .shell { flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* Hide rail on mobile — use bottom nav instead */
+  .rail { display: none; }
+
+  /* Sidebar becomes full screen when active */
+  .sidebar {
+    width: 100%;
+    height: 100vh;
+    position: fixed;
+    top: 0; left: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform .25s ease;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Main takes full width */
+  .main { width: 100%; flex: 1; }
+
+  /* Right panel hidden on mobile */
+  .rpanel { display: none; }
+
+  /* Bottom navigation bar */
+  .mobile-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 58px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 100;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 .5rem;
+  }
+  .mobile-nav-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: .5rem .8rem; border: none; background: transparent;
+    color: var(--muted2); cursor: pointer; border-radius: 10px;
+    transition: all .2s; font-family: var(--font);
+    position: relative; min-width: 44px;
+  }
+  .mobile-nav-btn.active { color: var(--accent); }
+  .mobile-nav-btn span { font-size: .5rem; font-weight: 600; letter-spacing: .02em; }
+  .mobile-nav-btn .mn-dot { position: absolute; top: 6px; right: 10px; width: 6px; height: 6px; border-radius: 50%; background: var(--rose); border: 1.5px solid var(--surface); }
+
+  /* Push content above bottom nav */
+  .main { padding-bottom: 58px; }
+  .msgs { padding-bottom: 70px; }
+
+  /* Topbar gets back button */
+  .mobile-back {
+    width: 34px; height: 34px; border-radius: 9px;
+    border: none; background: var(--panel);
+    color: var(--text); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; flex-shrink: 0;
+  }
+
+  /* Stories scroll better on mobile */
+  .stories { padding: .6rem .8rem; gap: .55rem; }
+  .story-ring { width: 40px; height: 40px; }
+  .story-inner { width: 34px; height: 34px; font-size: .65rem; }
+  .story-add-btn { width: 40px; height: 40px; font-size: .9rem; }
+
+  /* Chat bubbles wider on mobile */
+  .bubble { max-width: 82%; font-size: .82rem; }
+
+  /* Input bar better on mobile */
+  .input-bar { padding: .5rem .7rem; }
+  .input-wrap { padding: .45rem .75rem; }
+
+  /* Modal full width on mobile */
+  .modal-box { width: 95vw; padding: 1.5rem; }
+
+  /* Feed full width */
+  .feed { padding: .8rem; }
+  .feed-post { border-radius: 10px; }
+
+  /* Dating grid single column on small screens */
+  .match-grid { grid-template-columns: 1fr; }
+
+  /* Topbar compact */
+  .topbar { padding: .6rem .8rem; }
+  .tb-name { font-size: .82rem; }
 }
 
-.wa-bg {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.85);
-  backdrop-filter: blur(10px);
+@media (max-width: 480px) {
+  .bubble { max-width: 88%; }
+  .match-grid { grid-template-columns: 1fr; }
 }
 
-.wa-card {
-  position: relative;
-  width: 320px;
-  background: #111;
-  border-radius: 20px;
-  padding: 20px;
-  text-align: center;
-  color: white;
-  z-index: 2;
-}
-
-.wa-avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: #25D366;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  margin: 0 auto;
-}
-
-.wa-name {
-  margin-top: 10px;
-  font-weight: bold;
-  font-size: 18px;
-}
-
-.wa-status {
-  font-size: 13px;
-  color: #aaa;
-  margin-top: 5px;
-}
-
-.wa-actions {
-  display: flex;
-  justify-content: space-around;
-  margin-top: 20px;
-}
-
-.wa-accept {
-  background: #25D366;
-  border: none;
-  padding: 10px 15px;
-  border-radius: 10px;
-  color: white;
-}
-
-.wa-reject {
-  background: red;
-  border: none;
-  padding: 10px 15px;
-  border-radius: 10px;
-  color: white;
-}
-
-.wa-end {
-  background: #ff3b30;
-  border: none;
-  padding: 10px 15px;
-  border-radius: 10px;
-  color: white;
-}
-
-.wa-video {
-  width: 100%;
-  margin-top: 10px;
-  border-radius: 10px;
-}
-
-/* =========================
-   WHATSAPP CALL UI UPGRADE
-   ========================= */
-
-.wa-call {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wa-blur {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.92);
-  backdrop-filter: blur(12px);
-}
-
-.wa-container {
-  position: relative;
-  width: 100%;
-  max-width: 380px;
-  text-align: center;
-  color: white;
-  z-index: 2;
-}
-
-.wa-avatar {
-  width: 90px;
-  height: 90px;
-  border-radius: 50%;
-  background: #25D366;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 34px;
-  margin: 0 auto;
-  animation: pop 0.3s ease;
-}
-
-.wa-name {
-  margin-top: 12px;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.wa-status {
-  margin-top: 6px;
-  font-size: 13px;
-  color: #aaa;
-}
-
-/* pulse ring animation */
-.wa-ring-pulse {
-  position: absolute;
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  border: 2px solid #25D366;
-  animation: pulse 1.5s infinite;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-@keyframes pulse {
-  0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.8; }
-  100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
-}
-
-.wa-video {
-  width: 100%;
-  margin-top: 15px;
-  border-radius: 12px;
-}
-
-.wa-actions {
-  display: flex;
-  justify-content: space-around;
-  margin-top: 20px;
-}
-
-.wa-accept {
-  background: #25D366;
-  border: none;
-  padding: 12px 18px;
-  border-radius: 10px;
-  color: white;
-  font-weight: 600;
-}
-
-.wa-decline {
-  background: red;
-  border: none;
-  padding: 12px 18px;
-  border-radius: 10px;
-  color: white;
-  font-weight: 600;
-}
-
-.wa-end {
-  background: #ff3b30;
-  border: none;
-  padding: 12px 18px;
-  border-radius: 10px;
-  color: white;
-  font-weight: 600;
-}
-
-@keyframes pop {
-  from { transform: scale(0.8); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+/* Mobile backdrop and back button show on mobile */
+@media (max-width: 768px) {
+  .mobile-backdrop { display: block !important; }
+  #mobile-back-btn { display: flex !important; }
 }

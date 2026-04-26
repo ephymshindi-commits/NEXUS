@@ -17,7 +17,8 @@ export default function App() {
   const [profile, setProfile] = useState(null)
 
   // nav
-  const [view, setView] = useState('chats')
+  const [view,          setView]          = useState('chats')
+  const [sidebarOpen,   setSidebarOpen]   = useState(false)
 
   // conversations
   const [convs,       setConvs]       = useState([])
@@ -32,16 +33,17 @@ export default function App() {
   const [remoteStream, setRemoteStream] = useState(null)
 
   // ui
-  const [storyView,    setStoryView]   = useState(null)
-  const [showNewConv,  setShowNewConv] = useState(false)
-  const [showPlans,    setShowPlans]   = useState(false)
-  const [tab,          setTab]         = useState('all')
-  const [search,       setSearch]      = useState('')
-  const [userResults,  setUserResults] = useState([])
+  const [storyView,   setStoryView]   = useState(null)
+  const [showNewConv, setShowNewConv] = useState(false)
+  const [showPlans,   setShowPlans]   = useState(false)
+  const [tab,         setTab]         = useState('all')
+  const [search,      setSearch]      = useState('')
+  const [userResults, setUserResults] = useState([])
 
   const msgSub   = useRef(null)
   const msgEnd   = useRef(null)
   const peerConn = useRef(null)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768
 
   /* ── AUTH ── */
   useEffect(() => {
@@ -55,7 +57,6 @@ export default function App() {
     return () => subscription.unsubscribe()
   }, [])
 
-  // heartbeat
   useEffect(() => {
     if (!user) return
     const iv = setInterval(() => {
@@ -76,7 +77,8 @@ export default function App() {
 
   const signOut = async () => {
     await sb.auth.signOut()
-    setUser(null); setProfile(null); setConvs([]); setActiveConv(null); setMsgs([])
+    setUser(null); setProfile(null); setConvs([])
+    setActiveConv(null); setMsgs([])
   }
 
   /* ── CONVERSATIONS ── */
@@ -98,8 +100,15 @@ export default function App() {
   /* ── MESSAGES ── */
   const openConv = useCallback(async (conv) => {
     setActiveConv(conv)
-    if (msgSub.current) { await sb.removeChannel(msgSub.current); msgSub.current = null }
+    if (isMobile) setSidebarOpen(false)
 
+    // clear old subscription
+    if (msgSub.current) {
+      await sb.removeChannel(msgSub.current)
+      msgSub.current = null
+    }
+
+    // load messages
     const { data } = await sb
       .from('messages')
       .select('*, profiles(display_name, username)')
@@ -107,74 +116,101 @@ export default function App() {
       .order('created_at', { ascending: true })
       .limit(60)
     setMsgs(data || [])
-    setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 80)
+    setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100)
 
-msgSub.current = sb
-  .channel('msgs_' + conv.id + '_' + Math.random())
-  .on('postgres_changes',
-    { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.id}` },
-    (payload) => {
-      setMsgs((m) => {
-        // prevent duplicates
-        if (m.find(msg => msg.id === payload.new.id)) return m
-        return [...m, payload.new]
+    // fresh realtime subscription with unique channel name
+    const channelName = `room_${conv.id}_${user?.id}_${Date.now()}`
+    msgSub.current = sb
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conv.id}`,
+        },
+        (payload) => {
+          setMsgs((prev) => {
+            // skip if already have this message (sent by me optimistically)
+            const exists = prev.some(
+              (m) => m.id === payload.new.id || 
+              (m.id?.toString().startsWith('temp_') && m.content === payload.new.content && m.sender_id === payload.new.sender_id)
+            )
+            if (exists) {
+              // replace temp with real
+              return prev.map((m) =>
+                m.id?.toString().startsWith('temp_') && m.content === payload.new.content
+                  ? payload.new
+                  : m
+              )
+            }
+            return [...prev, payload.new]
+          })
+          setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Realtime connected for conv:', conv.id)
+        }
       })
-      setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-    }
-  )
-  .subscribe((status) => {
-    console.log('Realtime status:', status)
-  })
-  }, [])
+  }, [user?.id])
 
-const sendMsg = async () => {
+  const sendMsg = async () => {
     const text = input.trim()
     if (!text || !activeConv || !user) return
     setInput('')
 
-    // optimistically show message immediately
+    // show immediately on sender side
+    const tempId = 'temp_' + Date.now()
     const tempMsg = {
-      id: 'temp_' + Date.now(),
+      id: tempId,
       conversation_id: activeConv.id,
       sender_id: user.id,
       content: text,
       message_type: 'text',
       created_at: new Date().toISOString(),
-      profiles: { display_name: profile?.display_name, username: profile?.username }
+      profiles: {
+        display_name: profile?.display_name,
+        username: profile?.username,
+      },
     }
     setMsgs((m) => [...m, tempMsg])
     setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
 
-    const { data, error } = await sb.from('messages').insert({
-      conversation_id: activeConv.id,
-      sender_id: user.id,
-      content: text,
-      message_type: 'text',
-    }).select()
+    // save to database
+    const { data, error } = await sb
+      .from('messages')
+      .insert({
+        conversation_id: activeConv.id,
+        sender_id: user.id,
+        content: text,
+        message_type: 'text',
+      })
+      .select('*, profiles(display_name, username)')
+      .single()
 
     if (error) {
       toast('❌', 'Send failed: ' + error.message)
-      // remove temp message on failure
-      setMsgs((m) => m.filter(msg => msg.id !== tempMsg.id))
+      setMsgs((m) => m.filter((msg) => msg.id !== tempId))
       setInput(text)
       return
     }
 
-    // replace temp message with real one from db
-    if (data?.[0]) {
-      setMsgs((m) => m.map(msg => msg.id === tempMsg.id ? {...data[0], profiles: tempMsg.profiles} : msg))
+    // replace temp with real db message
+    if (data) {
+      setMsgs((m) => m.map((msg) => (msg.id === tempId ? data : msg)))
     }
 
-    // update conversation last message
-    await sb.from('conversations')
-      .update({ 
-        last_message: text,
-        last_message_at: new Date().toISOString()
-      })
+    // update conversation preview
+    await sb
+      .from('conversations')
+      .update({ last_message: text, last_message_at: new Date().toISOString() })
       .eq('id', activeConv.id)
-    
     loadConvs(user.id)
   }
+
   /* ── ONLINE USERS ── */
   const loadOnline = async (uid) => {
     const five = new Date(Date.now() - 5 * 60 * 1000).toISOString()
@@ -187,16 +223,14 @@ const sendMsg = async () => {
     setTimeout(() => loadOnline(uid), 30_000)
   }
 
-  /* ── WEBRTC CALLS ── */
+  /* ── WEBRTC ── */
   const startCall = async (type) => {
     if (!activeConv) { toast('💬', 'Select a conversation first'); return }
     try {
       const constraints = type === 'video' ? { video: true, audio: true } : { audio: true }
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
       setLocalStream(stream)
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      })
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
       peerConn.current = pc
       stream.getTracks().forEach((t) => pc.addTrack(t, stream))
       pc.ontrack = (e) => setRemoteStream(e.streams[0])
@@ -216,7 +250,7 @@ const sendMsg = async () => {
     toast('📵', 'Call ended')
   }
 
-  /* ── USER SEARCH ── */
+  /* ── SEARCH ── */
   const searchUsers = async (query) => {
     if (!query.trim() || query.length < 2) { setUserResults([]); return }
     const { data } = await sb
@@ -239,37 +273,46 @@ const sendMsg = async () => {
 
   if (!user) return <AuthScreen onAuth={handleAuth} />
 
+  const navItems = [
+    { id: 'chats',    icon: Icons.chat,  label: 'Chats' },
+    { id: 'feed',     icon: Icons.feed,  label: 'Feed' },
+    { id: 'dating',   icon: Icons.heart, label: 'Hearts', dot: true, dotColor: 'var(--rose)' },
+    { id: 'notifs',   icon: Icons.bell,  label: 'Alerts', dot: true, dotColor: 'var(--accent)' },
+    { id: 'settings', icon: Icons.cog,   label: 'Settings' },
+  ]
+
   /* ── RENDER ── */
   return (
     <div className="shell">
 
-      {/* RAIL */}
+      {/* DESKTOP RAIL */}
       <nav className="rail">
         <div className="rail-logo" onClick={() => toast('🚀', 'NEXUS')}>N</div>
-        <button className={`rail-btn${view === 'chats'    ? ' active' : ''}`} onClick={() => setView('chats')}    title="Messages">{Icons.chat}</button>
-        <button className={`rail-btn${view === 'feed'     ? ' active' : ''}`} onClick={() => setView('feed')}     title="Social Feed">{Icons.feed}</button>
-        <button className={`rail-btn${view === 'dating'   ? ' active' : ''}`} onClick={() => setView('dating')}   title="Hearts">
-          {Icons.heart}<span className="rdot" style={{ background: 'var(--rose)' }} />
-        </button>
-        <button className={`rail-btn${view === 'notifs'   ? ' active' : ''}`} onClick={() => setView('notifs')}   title="Notifications">
-          {Icons.bell}<span className="rdot" style={{ background: 'var(--accent)' }} />
-        </button>
+        {navItems.map((n) => (
+          <button
+            key={n.id}
+            className={`rail-btn${view === n.id ? ' active' : ''}`}
+            onClick={() => setView(n.id)}
+            title={n.label}
+          >
+            {n.icon}
+            {n.dot && <span className="rdot" style={{ background: n.dotColor }} />}
+          </button>
+        ))}
         <div className="rail-spacer" />
-        <button className={`rail-btn${view === 'settings' ? ' active' : ''}`} onClick={() => setView('settings')} title="Settings">{Icons.cog}</button>
         <div className="rav" style={{ background: clr(user.id) }} title={myName}>{ini(myName)}</div>
       </nav>
 
       {/* SIDEBAR */}
-      <div className="sidebar">
+      <div className={`sidebar${sidebarOpen ? ' mobile-open' : ''}`}>
         <div className="sb-head">
           <div className="sb-top">
             <span className="sb-title">
-              {{ chats: 'Messages', feed: 'Social Feed', dating: '💝 Hearts', notifs: 'Notifications', settings: 'Settings' }[view]}
+              {{ chats: 'Messages', feed: 'Feed', dating: '💝 Hearts', notifs: 'Notifications', settings: 'Settings' }[view]}
             </span>
-            <button className="icon-btn" onClick={() => setShowNewConv(true)} title="New">{Icons.plus}</button>
+            <button className="icon-btn" onClick={() => setShowNewConv(true)}>{Icons.plus}</button>
           </div>
 
-          {/* Search with live user dropdown */}
           <div className="search-row" style={{ position: 'relative' }}>
             {Icons.search}
             <input
@@ -279,7 +322,7 @@ const sendMsg = async () => {
               onBlur={() => setTimeout(() => setUserResults([]), 200)}
             />
             {userResults.length > 0 && (
-              <div style={{ position: 'absolute', top: '110%', left: 0, right: 0, background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 10, zIndex: 100, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
+              <div style={{ position: 'absolute', top: '110%', left: 0, right: 0, background: 'var(--panel)', border: '1px solid var(--border2)', borderRadius: 10, zIndex: 200, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,.4)' }}>
                 {userResults.map((u) => (
                   <div
                     key={u.id}
@@ -323,7 +366,7 @@ const sendMsg = async () => {
                 <div
                   key={c.id}
                   className={`ci${activeConv?.id === c.id ? ' active' : ''}`}
-                  onClick={() => { openConv(c); if (view !== 'chats') setView('chats') }}
+                  onClick={() => { openConv(c); setView('chats') }}
                 >
                   <Av name={c.name || '?'} id={c.id} size={40} />
                   <div className="ci-meta">
@@ -344,76 +387,89 @@ const sendMsg = async () => {
 
       {/* MAIN CONTENT */}
       <div className="main">
-        {view === 'feed'     ? <SocialFeed currentUser={user} currentProfile={profile} /> :
-         view === 'dating'   ? <DatingScreen onUpgrade={() => setShowPlans(true)} /> :
-         view === 'notifs'   ? <NotificationsPanel /> :
-         view === 'settings' ? <SettingsPanel user={user} profile={profile} onSignOut={signOut} /> :
+        {view === 'feed' ? (
+          <SocialFeed currentUser={user} currentProfile={profile} />
+        ) : view === 'dating' ? (
+          <DatingScreen onUpgrade={() => setShowPlans(true)} />
+        ) : view === 'notifs' ? (
+          <NotificationsPanel />
+        ) : view === 'settings' ? (
+          <SettingsPanel user={user} profile={profile} onSignOut={signOut} />
+        ) : activeConv ? (
+          <>
+            <StoriesBar onView={setStoryView} currentUser={user} currentProfile={profile} />
+            <div className="topbar">
+              {/* Mobile back button */}
+              <button
+                className="mobile-back"
+                onClick={() => { setActiveConv(null); setSidebarOpen(true) }}
+                style={{ display: 'none' }}
+                id="mobile-back-btn"
+              >←</button>
+              <Av name={activeConv.name} id={activeConv.id} size={34} />
+              <div className="tb-info">
+                <div className="tb-name">{activeConv.name}</div>
+                <div className="tb-status on">{activeConv.is_group ? `Group · ${msgs.length} messages` : 'Active'}</div>
+              </div>
+              <div className="tb-actions">
+                <button className="icon-btn" onClick={() => startCall('audio')}>{Icons.phone}</button>
+                <button className="icon-btn" onClick={() => startCall('video')}>{Icons.video}</button>
+                <button className="icon-btn">{Icons.dots}</button>
+              </div>
+            </div>
 
-         activeConv ? (
-           <>
-             <StoriesBar onView={setStoryView} />
-             <div className="topbar">
-               <Av name={activeConv.name} id={activeConv.id} size={34} />
-               <div className="tb-info">
-                 <div className="tb-name">{activeConv.name}</div>
-                 <div className="tb-status on">{activeConv.is_group ? `Group · ${msgs.length} messages` : 'Active'}</div>
-               </div>
-               <div className="tb-actions">
-                 <button className="icon-btn" onClick={() => startCall('audio')} title="Voice call">{Icons.phone}</button>
-                 <button className="icon-btn" onClick={() => startCall('video')} title="Video call">{Icons.video}</button>
-                 <button className="icon-btn">{Icons.dots}</button>
-               </div>
-             </div>
+            <div className="msgs">
+              {msgs.length === 0 && (
+                <div className="empty-state">
+                  <div className="ei">👋</div>
+                  <p>Say hello! Start the conversation.</p>
+                </div>
+              )}
+              <div className="date-div"><span>Today</span></div>
+              {msgs.map((m, i) => {
+                const mine = m.sender_id === user.id
+                const sn = m.profiles?.display_name || m.profiles?.username || 'Unknown'
+                return (
+                  <div key={m.id || i} className={`mrow msg-anim${mine ? ' mine' : ''}`}>
+                    {!mine && (
+                      <div className="mav" style={{ background: clr(m.sender_id), width: 24, height: 24, fontSize: '.55rem' }}>
+                        {ini(sn)}
+                      </div>
+                    )}
+                    <div className="bubble">
+                      {!mine && activeConv.is_group && <div className="msender">{sn}</div>}
+                      {m.content}
+                      <div className="mtime">{fmtTime(m.created_at)}{mine && ' ✓✓'}</div>
+                    </div>
+                  </div>
+                )
+              })}
+              <div ref={msgEnd} />
+            </div>
 
-             <div className="msgs">
-               {msgs.length === 0 && (
-                 <div className="empty-state">
-                   <div className="ei">👋</div>
-                   <p>Say hello! Start the conversation.</p>
-                 </div>
-               )}
-               <div className="date-div"><span>Today</span></div>
-               {msgs.map((m, i) => {
-                 const mine = m.sender_id === user.id
-                 const sn = m.profiles?.display_name || m.profiles?.username || 'Unknown'
-                 return (
-                   <div key={m.id || i} className={`mrow msg-anim${mine ? ' mine' : ''}`}>
-                     {!mine && <div className="mav" style={{ background: clr(m.sender_id), width: 24, height: 24, fontSize: '.55rem' }}>{ini(sn)}</div>}
-                     <div className="bubble">
-                       {!mine && activeConv.is_group && <div className="msender">{sn}</div>}
-                       {m.content}
-                       <div className="mtime">{fmtTime(m.created_at)}{mine && ' ✓✓'}</div>
-                     </div>
-                   </div>
-                 )
-               })}
-               <div ref={msgEnd} />
-             </div>
-
-             <div className="input-bar">
-               <div className="input-wrap">
-                 <button className="ib" onClick={() => toast('📎', 'File sharing — coming soon!')}>{Icons.attach}</button>
-                 <input
-                   value={input}
-                   onChange={(e) => setInput(e.target.value)}
-                   onKeyDown={(e) => e.key === 'Enter' && sendMsg()}
-                   placeholder={`Message ${activeConv.name}…`}
-                 />
-                 <button className="ib">{Icons.mic}</button>
-               </div>
-               <button className="send-btn" onClick={sendMsg}>{Icons.send}</button>
-             </div>
-           </>
-         ) : (
-           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-             <StoriesBar onView={setStoryView} />
-             <div className="empty-state">
-               <div className="ei">💬</div>
-               <p>Select a conversation to start messaging<br />or create a new one above</p>
-             </div>
-           </div>
-         )
-        }
+            <div className="input-bar">
+              <div className="input-wrap">
+                <button className="ib" onClick={() => toast('📎', 'File sharing — coming soon!')}>{Icons.attach}</button>
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sendMsg()}
+                  placeholder={`Message ${activeConv.name}…`}
+                />
+                <button className="ib">{Icons.mic}</button>
+              </div>
+              <button className="send-btn" onClick={sendMsg}>{Icons.send}</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <StoriesBar onView={setStoryView} currentUser={user} currentProfile={profile} />
+            <div className="empty-state">
+              <div className="ei">💬</div>
+              <p>Select a conversation to start messaging<br />or create a new one above</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* RIGHT PANEL */}
@@ -428,16 +484,14 @@ const sendMsg = async () => {
             <button className="btn-upgrade" onClick={() => setShowPlans(true)}>⭐ View Plans — from $1</button>
           </div>
         </div>
-
         <div className="rp-sec">
           <div className="rp-lbl">💝 Nexus Hearts</div>
           <div className="dating-card">
             <h3>💝 Find Your Match</h3>
-            <p>3 people near you match your profile. Unlock with Premium.</p>
+            <p>3 people near you match your profile.</p>
             <button className="btn-dating" onClick={() => setView('dating')}>See Who Likes You →</button>
           </div>
         </div>
-
         <div className="rp-sec">
           <div className="rp-lbl">Active Now</div>
           {onlineUsers.length === 0
@@ -456,7 +510,6 @@ const sendMsg = async () => {
               ))
           }
         </div>
-
         <div className="rp-sec">
           <div className="rp-lbl">🛟 Support</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
@@ -475,16 +528,13 @@ const sendMsg = async () => {
             ))}
           </div>
         </div>
-
         <div className="rp-sec">
           <div className="rp-lbl">Suggested for You</div>
           {onlineUsers.length === 0 ? (
             <div style={{ fontSize: '.7rem', color: 'var(--muted)', lineHeight: 1.7 }}>
               Invite friends to join Nexus!<br />
-              <a
-                href={`mailto:?subject=Join me on NEXUS&body=Hey! Join me on NEXUS — sign up at ${typeof window !== 'undefined' ? window.location.origin : ''}`}
-                style={{ color: 'var(--accent)', fontSize: '.68rem', textDecoration: 'none', fontWeight: 600 }}
-              >
+              <a href={`mailto:?subject=Join me on NEXUS&body=Hey! Join me on NEXUS — sign up at ${typeof window !== 'undefined' ? window.location.origin : ''}`}
+                style={{ color: 'var(--accent)', fontSize: '.68rem', textDecoration: 'none', fontWeight: 600 }}>
                 📨 Send invite link
               </a>
             </div>
@@ -510,12 +560,45 @@ const sendMsg = async () => {
         </div>
       </div>
 
+      {/* MOBILE BOTTOM NAV */}
+      <div className="mobile-nav">
+        {navItems.map((n) => (
+          <button
+            key={n.id}
+            className={`mobile-nav-btn${view === n.id ? ' active' : ''}`}
+            onClick={() => {
+              setView(n.id)
+              if (n.id === 'chats') setSidebarOpen(true)
+            }}
+          >
+            {n.dot && <span className="mn-dot" style={{ background: n.dotColor }} />}
+            {n.icon}
+            <span>{n.label}</span>
+          </button>
+        ))}
+        <button
+          className="mobile-nav-btn"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          <span>Menu</span>
+        </button>
+      </div>
+
+      {/* Mobile sidebar overlay backdrop */}
+      {sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 49, display: 'none' }}
+          className="mobile-backdrop"
+        />
+      )}
+
       {/* OVERLAYS */}
-      {call && <CallOverlay call={call} onEnd={endCall} localStream={localStream} remoteStream={remoteStream} />}
+      {call        && <CallOverlay call={call} onEnd={endCall} localStream={localStream} remoteStream={remoteStream} />}
       {storyView   && <StoryViewer story={storyView} onClose={() => setStoryView(null)} />}
       {showNewConv && <NewConvModal onClose={() => setShowNewConv(false)} uid={user.id} onCreated={(conv) => { setShowNewConv(false); loadConvs(user.id); openConv(conv); setView('chats'); toast('✅', 'Conversation created!') }} />}
-      {showPlans   && <PlansModal onClose={() => setShowPlans(false)} onSelect={(plan) => { setShowPlans(false); toast('⭐', `${plan === 'premium' ? 'Premium' : 'Basic'} selected — payment coming soon!`) }} />}
-
+      {showPlans   && <PlansModal onClose={() => setShowPlans(false)} onSelect={(plan) => { setShowPlans(false); toast('⭐', `${plan === 'premium' ? 'Premium' : 'Basic'} — payment coming soon!`) }} />}
     </div>
   )
 }
