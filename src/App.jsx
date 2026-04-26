@@ -119,7 +119,7 @@ export default function App() {
     setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100)
 
     // fresh realtime subscription with unique channel name
-    const channelName = `room_${conv.id}_${user?.id}_${Date.now()}`
+const channelName = `room-${conv.id}`
     msgSub.current = sb
       .channel(channelName)
       .on(
