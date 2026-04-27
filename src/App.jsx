@@ -98,68 +98,102 @@ export default function App() {
   }
 
   /* ── MESSAGES ── */
-  const openConv = useCallback(async (conv) => {
-    setActiveConv(conv)
-    if (isMobile) setSidebarOpen(false)
+const openConv = useCallback(async (conv) => {
+  setActiveConv(conv)
+  if (isMobile) setSidebarOpen(false)
 
-    // clear old subscription
-    if (msgSub.current) {
-      sb.removeChannel(msgSub.current)
-      msgSub.current = null
-    }
+  // clear old subscription and polling
+  if (msgSub.current) {
+  if (msgSub.current._pollInterval) {
+    clearInterval(msgSub.current._pollInterval)
+  }
+  sb.removeChannel(msgSub.current)
+  msgSub.current = null
+}
 
-    // load existing messages
-    const { data } = await sb
+  // load existing messages
+  const { data } = await sb
+    .from('messages')
+    .select('*, profiles(display_name, username)')
+    .eq('conversation_id', conv.id)
+    .order('created_at', { ascending: true })
+    .limit(60)
+  setMsgs(data || [])
+  setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+
+  // Track latest message timestamp for polling
+  let lastMsgTime = data?.length
+    ? data[data.length - 1].created_at
+    : new Date(0).toISOString()
+
+  // POLLING — fetch new messages every 3 seconds (guaranteed delivery)
+  const pollInterval = setInterval(async () => {
+    const { data: newMsgs } = await sb
       .from('messages')
       .select('*, profiles(display_name, username)')
       .eq('conversation_id', conv.id)
+      .gt('created_at', lastMsgTime)
       .order('created_at', { ascending: true })
-      .limit(60)
-    setMsgs(data || [])
-    setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100)
 
-    // Subscribe WITHOUT filter (free plan compatible)
-    // filter client-side by conversation_id
-    msgSub.current = sb
-      .channel(`conv-${conv.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        async (payload) => {
-          if (payload.new.conversation_id !== conv.id) return
-
-          // fetch full message with profile
-          const { data: fullMsg } = await sb
-            .from('messages')
-            .select('*, profiles(display_name, username)')
-            .eq('id', payload.new.id)
-            .single()
-
-          const msg = fullMsg || payload.new
-
-          setMsgs((prev) => {
-            // replace temp if exists
-            const tempIdx = prev.findIndex(
-              (m) => m.id?.toString().startsWith('temp_') &&
-              m.content === msg.content &&
-              m.sender_id === msg.sender_id
-            )
-            if (tempIdx !== -1) {
-              const updated = [...prev]
-              updated[tempIdx] = msg
-              return updated
-            }
-            if (prev.some((m) => m.id === msg.id)) return prev
-            return [...prev, msg]
-          })
-          setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-        }
-      )
-      .subscribe((status) => {
-        console.log('Realtime:', status, 'conv:', conv.id)
+    if (newMsgs?.length) {
+      lastMsgTime = newMsgs[newMsgs.length - 1].created_at
+      setMsgs((prev) => {
+        let updated = [...prev]
+        newMsgs.forEach((msg) => {
+          // replace temp message if exists
+          const tempIdx = updated.findIndex(
+            (m) => m.id?.toString().startsWith('temp_') &&
+            m.content === msg.content &&
+            m.sender_id === msg.sender_id
+          )
+          if (tempIdx !== -1) {
+            updated[tempIdx] = msg
+          } else if (!updated.some((m) => m.id === msg.id)) {
+            updated.push(msg)
+          }
+        })
+        return updated
       })
-  }, [user?.id])
+      setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    }
+  }, 3000)
 
+  // Also try realtime as bonus (works if it works, no harm if not)
+  msgSub.current = sb
+    .channel(`conv-${conv.id}`)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages' },
+      async (payload) => {
+        if (payload.new.conversation_id !== conv.id) return
+        const { data: fullMsg } = await sb
+          .from('messages')
+          .select('*, profiles(display_name, username)')
+          .eq('id', payload.new.id)
+          .single()
+        const msg = fullMsg || payload.new
+        setMsgs((prev) => {
+          const tempIdx = prev.findIndex(
+            (m) => m.id?.toString().startsWith('temp_') &&
+            m.content === msg.content &&
+            m.sender_id === msg.sender_id
+          )
+          if (tempIdx !== -1) {
+            const updated = [...prev]
+            updated[tempIdx] = msg
+            return updated
+          }
+          if (prev.some((m) => m.id === msg.id)) return prev
+          return [...prev, msg]
+        })
+        setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+      }
+    )
+    .subscribe()
+
+  // Store interval ID so we can clear it when conv changes
+  msgSub.current._pollInterval = pollInterval
+
+}, [user?.id])
   const sendMsg = async () => {
     const text = input.trim()
     if (!text || !activeConv || !user) return
