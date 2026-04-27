@@ -104,11 +104,11 @@ export default function App() {
 
     // clear old subscription
     if (msgSub.current) {
-      await sb.removeChannel(msgSub.current)
+      sb.removeChannel(msgSub.current)
       msgSub.current = null
     }
 
-    // load messages
+    // load existing messages
     const { data } = await sb
       .from('messages')
       .select('*, profiles(display_name, username)')
@@ -118,42 +118,45 @@ export default function App() {
     setMsgs(data || [])
     setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 100)
 
-    // fresh realtime subscription with unique channel name
-const channelName = `room-${conv.id}`
+    // Subscribe WITHOUT filter (free plan compatible)
+    // filter client-side by conversation_id
     msgSub.current = sb
-      .channel(channelName)
+      .channel(`conv-${conv.id}`)
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=eq.${conv.id}`,
-        },
-        (payload) => {
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        async (payload) => {
+          if (payload.new.conversation_id !== conv.id) return
+
+          // fetch full message with profile
+          const { data: fullMsg } = await sb
+            .from('messages')
+            .select('*, profiles(display_name, username)')
+            .eq('id', payload.new.id)
+            .single()
+
+          const msg = fullMsg || payload.new
+
           setMsgs((prev) => {
-            // skip if already have this message (sent by me optimistically)
-            const exists = prev.some(
-              (m) => m.id === payload.new.id || 
-              (m.id?.toString().startsWith('temp_') && m.content === payload.new.content && m.sender_id === payload.new.sender_id)
+            // replace temp if exists
+            const tempIdx = prev.findIndex(
+              (m) => m.id?.toString().startsWith('temp_') &&
+              m.content === msg.content &&
+              m.sender_id === msg.sender_id
             )
-            if (exists) {
-              // replace temp with real
-              return prev.map((m) =>
-                m.id?.toString().startsWith('temp_') && m.content === payload.new.content
-                  ? payload.new
-                  : m
-              )
+            if (tempIdx !== -1) {
+              const updated = [...prev]
+              updated[tempIdx] = msg
+              return updated
             }
-            return [...prev, payload.new]
+            if (prev.some((m) => m.id === msg.id)) return prev
+            return [...prev, msg]
           })
           setTimeout(() => msgEnd.current?.scrollIntoView({ behavior: 'smooth' }), 50)
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Realtime connected for conv:', conv.id)
-        }
+        console.log('Realtime:', status, 'conv:', conv.id)
       })
   }, [user?.id])
 
